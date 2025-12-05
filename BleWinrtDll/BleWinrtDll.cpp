@@ -560,6 +560,61 @@ bool SendData(BLEData* data, bool block) {
 	return result;
 }
 
+void Disconnect(wchar_t* deviceId) {
+	if (deviceId == nullptr || deviceId[0] == L'\0') {
+		return;
+	}
+	StopDeviceScan();
+
+	long deviceHash = hsh(deviceId);
+	auto deviceIt = cache.find(deviceHash);
+	if (deviceIt == cache.end()) {
+		// Device not connected or already disconnected
+		return;
+	}
+
+	// Unsubscribe
+	for (auto it = subscriptions.begin(); it != subscriptions.end(); ) {
+		auto sub = *it;
+		bool erase = false;
+		try {
+			if (sub && sub->characteristic) {
+				auto did = sub->characteristic.Service().Device().DeviceId();
+				if (did == winrt::hstring(deviceId)) {
+					sub->revoker.revoke();
+					erase = true;
+				}
+			}
+		}
+		catch (winrt::hresult_error const&) {
+			// Already closed
+			erase = true;
+		}
+		if (erase) {
+			delete sub;
+			it = subscriptions.erase(it);
+		}
+		else {
+			++it;
+		}
+	}
+
+	// Close and erase service
+	for (auto sIt = deviceIt->second.services.begin(); sIt != deviceIt->second.services.end(); ) {
+		if (sIt->second.service != nullptr) {
+			sIt->second.service.Close();
+		}
+		sIt = deviceIt->second.services.erase(sIt);
+	}
+
+	// Close device and erace
+	if (deviceIt->second.device != nullptr) {
+		deviceIt->second.device.Close();
+	}
+	cache.erase(deviceIt);
+}
+
+
 void Quit() {
 	{
 		lock_guard lock(quitLock);
